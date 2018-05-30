@@ -5,11 +5,8 @@
 
 # promised-mongo
 
-A slight rewrite of [mongojs](https://github.com/mafintosh/mongojs) to support promises.  To aid with
-migration, this API is fully backwardly-compatible with mongojs, but all functions that accept callbacks now return promises too.
-Promises are [Promises/A+](http://promises-aplus.github.io/promises-spec/) compatible, so you are free
-to use [any compatible promise library](https://github.com/promises-aplus/promises-spec/blob/master/implementations.md).
-The promise library used by this project is [Q](https://github.com/kriskowal/q).
+A complete rewrite of [mongojs](https://github.com/mafintosh/mongojs) to support promises.  In a
+break with previous versions, this library only supports promises, and not callbacks.
 
 
 ## Install
@@ -18,17 +15,62 @@ promised-mongo is available through [npm](http://npmjs.org):
 
 	npm install promised-mongo
 
+
+## Compatability with previous versions
+
+I no longer use [Q](https://github.com/kriskowal/q) for promises.  This means that you can't  use
+`.done()` at the end of promise chains.  To turn on compatability with previous versions, you can
+call the `compatible()` function:
+
+```js
+var pmongo = require('promised-mongo').compatible();
+```
+
+Other than dropping support for callbacks, I have tried to make sure that the new library is
+compatible with the old tests (see the legacy_tests folder).
+
+
+## How I write JavaScript
+
+I like using [async functions](https://github.com/lukehoban/ecmascript-asyncawait) from current
+EMCAScript proposals.  This makes node amazingly easier to understand.  An example from the tests:
+
+```js
+it('returns all documents', async function () {
+  let docs = [{hello: 'world'}, {hello: 'kitty'}];
+  await collection.insert(docs);
+  let cursor = collection.find();
+  expect(cursor).to.be.an.instanceof(Cursor);
+  let result = await cursor.toArray();
+  expect(result).to.deep.have.members(docs);
+});
+```
+
+Isn't it so much easier to understand?  The downsides (of course there had to be some) is that since
+this is so bleeding edge, editor support and debugging support are varied and patchy, and there's a
+chance that the feature won't even make it to the final language specification.
+
+This is compiled to ES5 using [babel](https://babeljs.io/).
+
+
+## Documentation
+
+The documentation below refers to an older version.  Most of it should still work the same however.
+Watch this space for improvements.
+
+
 ## Usage
 
-Use promised-mongo just like mongojs, except you can also use the returned promise instead of the
-callback.  Note that a promise isn't returned if a callback is specified.
+Use promised-mongo just like mongojs, except that you use the returned promise instead of a
+callback.
 
 ```js
 var pmongo = require('promised-mongo');
 var db = pmongo(connectionString, [collections]);
 ```
 
-The connection string should follow the format desribed in [the mongo connection string docs](http://docs.mongodb.org/manual/reference/connection-string/).
+The connection string should follow the format desribed in
+[the mongo connection string docs](http://docs.mongodb.org/manual/reference/connection-string/).
 Some examples of this could be:
 
 ``` js
@@ -48,7 +90,7 @@ var mycollection = db.collection('mycollection');
 
 After we connected we can query or update the database just how we would using the mongo API with the exception that the functions return
 a promise for the result rather than the result itself.  Cursor operations such as `find()` and `sort()` return a **cursor**; to get a
-promise for the result, you have to force evaluation using `toArray()`.  The function `findOne()` returns a promise immediately, not a cursor.
+promise for the result, you have to force evaluation using `toArray()`.  Alternatively, you can just call `then()` on the cursor and it will call `toArray()` for you, returning a promise.  The function `findOne()` returns a promise immediately, not a cursor.
 Note that due to [limitations in the Q promise library](https://github.com/kriskowal/q/#the-end), you should call `.done()` at the end of
 any promise chain you aren't returning, in order to throw any uncaught exceptions.  For brevity, the examples in this readme don't do that.
 
@@ -61,15 +103,6 @@ db.mycollection.find().toArray().then(function(docs){
 // find everything, but sort by name
 db.mycollection.find().sort({name:1}).toArray().then(function(docs) {
 	// docs is now a sorted array
-});
-
-// iterate over all whose level is greater than 90.
-db.mycollection.find({level:{$gt:90}}).forEach(function(err, doc) {
-	if (!doc) {
-		// we visited all docs in the collection
-		return;
-	}
-	// doc is a document in the collection
 });
 
 // find a document using a native ObjectId
@@ -98,6 +131,32 @@ db.mycollection.findAndModify({
 // use the save function to just save a document
 db.mycollection.save({created:'just now'});
 
+```
+
+The `forEach` function is a special case.  The library supports the mongojs style:
+
+``` js
+// iterate over all whose level is greater than 90.
+db.mycollection.find({level:{$gt:90}}).forEach(function(err, doc) {
+	if (doc) {
+      //do things with doc
+    } else {
+      //the callback gets called at the end with a null doc
+      console.log('Finished!');
+    }
+});
+```
+
+It also supports a promise version.  If you pass a callback to the `forEach` function with only one argument, you get the promise version.  The promise will resolve (with `undefined`) when the callback has been called for all documents.
+
+``` js
+// iterate over all whose level is greater than 90 (promise version)
+db.mycollection.find({level:{$gt:90}}).forEach(function(doc) {
+	//do things with doc
+})
+.then(function () {
+  console.log('Finished!');
+});
 ```
 
 To access `lastErrorObject` returned by `findAndModify` using the promises API, use the `findAndModifyEx` function:
@@ -175,7 +234,9 @@ With promised-mongo you can run database commands just like with the mongo shell
 
 ```js
 db.runCommand({ping:1}).then(function(res) {
-	if(!err && res.ok) console.log("we're up");
+	if(res.ok) console.log("we're up");
+}).catch(function(err){
+	if(err) console.log("we aren't up", err);
 });
 ```
 
